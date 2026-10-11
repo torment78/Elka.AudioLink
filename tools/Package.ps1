@@ -40,4 +40,6 @@ foreach($name in @('receiver','plugin')){& $iscc "/DPayloadDir=$payload" "/DOutp
 Compress-Archive -Path "$payload\receiver","$payload\plugin" -DestinationPath "$output\elka-audiolink-$Version-windows-x64-portable.zip" -Force
 $hashes=Get-ChildItem -LiteralPath $output -File | Where-Object {$_.Extension -in '.exe','.zip'} | Sort-Object Name | ForEach-Object {"$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"}
 [IO.File]::WriteAllLines("$output\SHA256SUMS.txt",$hashes,[Text.UTF8Encoding]::new($false))
+$releaseHashes=$hashes | Where-Object {$_ -match ('  elka-audiolink-(obs-|receiver-)?'+[regex]::Escape($Version)+'-windows-x64-')}
+[IO.File]::WriteAllLines("$output\SHA256SUMS-v$Version.txt",$releaseHashes,[Text.UTF8Encoding]::new($false))
 Write-Output "Packages ready: $output"
