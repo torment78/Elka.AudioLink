@@ -3,7 +3,7 @@
 Send the OBS headphone / monitor mix to another Windows PC over an encrypted TCP
 connection. A small receiver turns it into a local VBAN stream for VoiceMeeter.
 
-**0.1.0 preview · Windows x64 · OBS 31.1.1 or later**
+**0.1.1 preview · Windows x64 · OBS 31.1.1 or later**
 
 AudioLink uses the same source monitoring choices as VBAN Stream's return:
 **Monitor Only** and **Monitor and Output** contribute; **Monitor Off** does not.
@@ -21,7 +21,32 @@ OBS sample rate. There is no lossy codec, virtual cable, or virtual network adap
 4. Choose the desired VoiceMeeter destination strip.
 5. Click **Copy pairing code**. Send that code privately to the OBS operator or
    copy it directly if you operate both PCs. It grants permission to send audio.
-6. Keep the helper running. Closing it stops reception.
+6. Close the window to leave the receiver running in the **system tray**. Audio
+   continues until you choose **Shut down** from its tray menu.
+
+### Tray controls and meter
+
+Click the AudioLink tray icon to reopen the window, or right-click it for:
+
+- **Open settings** — restore the receiver window.
+- **Refresh / reconnect** — restart reception with the last applied settings and
+  refresh local addresses. Audio briefly stops while the OBS sender reconnects.
+  Unsaved edits in the window are not applied by this action.
+- **Shut down** — stop reception and exit completely.
+
+Opening the app again restores the existing receiver. Windows may place its icon
+under the hidden-icons arrow. If the system tray is unavailable, closing the
+window exits instead of leaving an inaccessible background receiver.
+
+The stereo received-audio meter updates at approximately **60 Hz** while the
+window is visible. It shows left/right sample peaks on a dBFS scale, with immediate
+attack, smooth fall, and a one-second peak marker. Short peaks between display
+updates are retained. Meter refresh pauses while hidden or minimized; audio keeps
+flowing. It measures incoming audio before the receive buffer, not VoiceMeeter's
+playback level.
+
+To update from 0.1.0, exit the old receiver before installing 0.1.1. Pairing and
+saved settings are retained. The existing 0.1.0 OBS plugin remains compatible.
 
 The receiver deliberately sends to loopback only. This avoids the external UDP
 receive path. Whether VoiceMeeter accepts that local stream on the problem PC

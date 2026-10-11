@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <functional>
 #include <mutex>
+#include <algorithm>
 namespace linkaudio {
 constexpr quint16 defaultPort = 45991, discoveryPort = 45992;
 constexpr int maxMessage = 4096;
@@ -47,6 +48,18 @@ struct SharedStatus {
     mutable std::mutex mutex;
     Status value;
     QList<Peer> peers;
+    std::array<double, 2> meterPeak{};
+    void recordMeterPeak(const std::array<double, 2> &peak) {
+        std::lock_guard lock(mutex);
+        for (size_t c = 0; c < 2; ++c)
+            meterPeak[c] = std::max(meterPeak[c], peak[c]);
+    }
+    std::array<double, 2> takeMeterPeak() {
+        std::lock_guard lock(mutex);
+        const auto peak = meterPeak;
+        meterPeak = {};
+        return peak;
+    }
     Status get() const {
         std::lock_guard lock(mutex);
         return value;
@@ -54,6 +67,8 @@ struct SharedStatus {
     void set(const Status &s) {
         std::lock_guard lock(mutex);
         value = s;
+        if (!s.connected)
+            meterPeak = {};
     }
     QList<Peer> found() const {
         std::lock_guard lock(mutex);

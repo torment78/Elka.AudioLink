@@ -304,6 +304,8 @@ void Receiver::stop() {
     haveSequence = false;
     status.connected = false;
     status.state = "Stopped";
+    status.peak = 0;
+    status.queuedMs = 0;
     shared.set(status);
 }
 void Receiver::incomingConnection(qintptr descriptor) {
@@ -403,8 +405,11 @@ bool Receiver::message(Message type, const QByteArray &data) {
     lastAudio = now();
     ++status.received;
     status.peak = 0;
-    for (float f : decoded.samples)
-        status.peak = std::max(status.peak, double(std::abs(f)));
+    std::array<double, 2> peak{};
+    for (size_t i = 0; i < decoded.samples.size(); ++i)
+        peak[i % 2] = std::max(peak[i % 2], double(std::abs(decoded.samples[i])));
+    status.peak = std::max(peak[0], peak[1]);
+    shared.recordMeterPeak(peak);
     auto packet = data;
     std::memset(packet.data() + 8, 0, 16);
     auto name = config.stream.toLatin1();

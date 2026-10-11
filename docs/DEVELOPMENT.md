@@ -70,6 +70,20 @@ identity. It is not mDNS and does not install a service. No WAN relay is provide
 
 ## Validation
 
+`receiver-tray-and-meter` exercises the real receiver window on the Windows Qt
+platform with isolated settings and a TLS sender. It checks continuing VBAN audio
+after closing to the tray, reconnect from the tray, reopen/minimize behavior,
+shutdown releasing the listener, stereo peak capture and dBFS ballistics, and a
+measured display cadence near 60 Hz. Its window is not shown on the desktop.
+
+The receiver uses QSystemTrayIcon for the Windows notification area and a
+16,666,667 ns QChronoTimer for the visible meter. A separate 250 ms status timer
+updates text and the tray tooltip. The network worker accumulates per-channel
+peaks across every decoded block until consumed by the display; disconnect/stop
+clears pending peaks. These operations are outside OBS capture callbacks.
+The notification-area behavior follows the
+[Qt system tray API](https://doc.qt.io/qt-6/qsystemtrayicon.html).
+
 `transport-and-local-vban` covers fragmented/coalesced/invalid frames, protected
 identity persistence, LAN discovery, certificate pinning, token rejection, actual
 TLS transfer, PCM preservation, local source address, packet sequence, receiver

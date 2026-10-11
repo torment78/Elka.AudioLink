@@ -7,7 +7,7 @@
 [Setup]
 AppId={{14BC234E-3400-4EB5-974A-EB958C16D5EF}
 AppName=Elka AudioLink OBS Plugin
-AppVersion=0.1.0
+AppVersion=0.1.1
 AppPublisher=ElkaSoft
 DefaultDirName={autopf}\obs-studio
 UsePreviousAppDir=no
@@ -19,7 +19,7 @@ MinVersion=10.0
 WizardStyle=modern dark
 LicenseFile=..\LICENSE
 OutputDir={#OutputPath}
-OutputBaseFilename=elka-audiolink-obs-0.1.0-windows-x64-setup
+OutputBaseFilename=elka-audiolink-obs-0.1.1-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 CloseApplications=no

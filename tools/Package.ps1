@@ -1,6 +1,6 @@
-param([string]$Version='0.1.0')
+param([string]$Version='0.1.1')
 $ErrorActionPreference='Stop'
-if($Version -ne '0.1.0'){throw 'Update the installer versions before packaging another version.'}
+if($Version -ne '0.1.1'){throw 'Update the installer versions before packaging another version.'}
 $root=Split-Path $PSScriptRoot -Parent
 $qt=Join-Path $root '.deps\obs-deps-qt6-2025-07-11-x64'
 $deps=Join-Path $root '.deps\obs-deps-2025-07-11-x64'

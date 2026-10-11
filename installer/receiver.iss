@@ -7,7 +7,7 @@
 [Setup]
 AppId={{7AB7D0A5-596F-4B34-980C-76F5F263839B}
 AppName=Elka AudioLink Receiver
-AppVersion=0.1.0
+AppVersion=0.1.1
 AppPublisher=ElkaSoft
 DefaultDirName={localappdata}\Programs\ElkaSoft\AudioLink
 DefaultGroupName=Elka AudioLink
@@ -18,7 +18,7 @@ MinVersion=10.0
 WizardStyle=modern dark
 LicenseFile=..\LICENSE
 OutputDir={#OutputPath}
-OutputBaseFilename=elka-audiolink-receiver-0.1.0-windows-x64-setup
+OutputBaseFilename=elka-audiolink-receiver-0.1.1-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 CloseApplications=no
