@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "receiver-window.hpp"
+#include "mock-vm.hpp"
 #include <QNetworkDatagram>
 #include <iostream>
 #include <stdexcept>
@@ -54,10 +55,49 @@ int main(int argc, char **argv) {
             settings.setValue("vbanPort", sink.localPort());
             settings.setValue("name", "Receiver lifecycle test");
             settings.sync();
-            ReceiverWindow window(root.path());
+            auto fake = std::make_unique<MockVm>();
+            auto *vm = fake.get();
+            ReceiverWindow window(root.path(), true, std::move(fake));
             window.setAttribute(Qt::WA_DontShowOnScreen);
             window.resize(680, 970);
             window.show();
+            auto *tabs = window.findChild<QTabWidget *>("outputTabs");
+            auto *strips = window.findChild<QRadioButton *>("callbackStrips");
+            auto *buses = window.findChild<QRadioButton *>("callbackBuses");
+            auto *all = window.findChild<QPushButton *>("callbackAll");
+            auto *detect = window.findChild<QPushButton *>("vmDetect");
+            auto *routing = dynamic_cast<CallbackSettings *>(tabs->widget(1));
+            tabs->setCurrentIndex(1);
+            ReceiverConfig draft;
+            strips->click();
+            all->click();
+            routing->configure(draft);
+            check(draft.vmType == 3 && draft.destinations == 255, "Potato exposes all eight strips");
+            buses->click();
+            all->click();
+            routing->configure(draft);
+            check(draft.destinations == 31 && draft.target == CallbackTarget::buses,
+                  "Potato exposes A1-A5 without B buses");
+            vm->edition = 2;
+            detect->click();
+            routing->configure(draft);
+            check(draft.destinations == 0, "edition change clears stale selection");
+            all->click();
+            routing->configure(draft);
+            check(draft.destinations == 7, "Banana has three A buses");
+            strips->click();
+            all->click();
+            routing->configure(draft);
+            check(draft.destinations == 31, "Banana has five strips");
+            vm->edition = 3;
+            detect->click();
+            buses->click();
+            all->click();
+            window.findChild<QCheckBox *>("callbackDestination2")->setChecked(false);
+            routing->configure(draft);
+            check(draft.destinations == 29 && !vm->callback,
+                  "arbitrary selection; editing does not activate callback");
+            tabs->setCurrentIndex(0);
             auto *tray = window.findChild<QSystemTrayIcon *>("receiverTray");
             auto *refresh = window.findChild<QAction *>("trayRefresh");
             auto *open = window.findChild<QAction *>("trayOpen");
@@ -115,6 +155,10 @@ int main(int argc, char **argv) {
             std::cout << "Meter frames in 500 ms: " << frames << '\n';
             if (argc > 1) {
                 check(window.grab().save(QString::fromLocal8Bit(argv[1])), "receiver preview saved");
+                tabs->setCurrentIndex(1);
+                check(window.grab().save(QString::fromLocal8Bit(argv[1]) + ".callback.png"),
+                      "callback controls preview saved");
+                tabs->setCurrentIndex(0);
                 auto *menu = tray->contextMenu();
                 menu->ensurePolished();
                 menu->resize(menu->sizeHint());

@@ -20,6 +20,10 @@ inline QString style() {
         "text-align:center; }"
         "QProgressBar::chunk { background:#48c4ad; border-radius:3px; }"
         "QCheckBox { spacing:8px; } QCheckBox::indicator { width:18px; height:18px; }"
+        "QTabWidget::pane { border:1px solid #343e4d; border-radius:5px; }"
+        "QTabBar::tab { background:#222a35; color:#a2afbe; padding:9px 24px; border:1px solid #343e4d; }"
+        "QTabBar::tab:selected { background:#166b7c; color:#f5f8fc; }"
+        "QRadioButton { spacing:8px; padding:6px 0; } QRadioButton::indicator { width:18px; height:18px; }"
         "QToolTip { background:#222a35; color:#eef3fa; border:1px solid #52647d; }");
 }
 } // namespace linkaudio
