@@ -26,14 +26,29 @@ class CallbackAudio {
     int bufferMs;
     bool primed = false;
     float fade = 0;
+    std::atomic<float> requestedGain{1};
+    float currentGain = 1;
+    static_assert(std::atomic<float>::is_always_lock_free, "Audio gain must not lock in the callback");
+    float gainForDb(int db) const {
+        return target == CallbackTarget::strips ? 1.0f
+               : db <= -61                      ? 0.0f
+                                                : std::pow(10.0f, std::clamp(db, -60, 0) / 20.0f);
+    }
 
   public:
     std::atomic<bool> enabled{true}, restartNeeded{false}, invalidBuffer{false};
     std::atomic<uint32_t> rate{0};
     std::atomic<uint32_t> quantum{0};
     std::atomic<uint64_t> calls{0}, delivered{0}, underruns{0}, dropped{0};
-    CallbackAudio(int type, CallbackTarget t, uint32_t selected, int buffer)
-        : layout(VmLayout::forType(type)), target(t), mask(selected), bufferMs(buffer) {}
+    CallbackAudio(int type, CallbackTarget t, uint32_t selected, int buffer, int busGainDb = 0)
+        : layout(VmLayout::forType(type)), target(t), mask(selected), bufferMs(buffer) {
+        currentGain = gainForDb(busGainDb);
+        requestedGain.store(currentGain, std::memory_order_relaxed);
+    }
+    // Called by the worker. Convert dB here, never in the realtime callback.
+    void setBusGainDb(int db) {
+        requestedGain.store(gainForDb(db), std::memory_order_relaxed);
+    }
     size_t queued() const {
         const auto r = read.load(std::memory_order_acquire);
         const auto w = write.load(std::memory_order_acquire);
@@ -120,6 +135,8 @@ class CallbackAudio {
         if (!primed && w - r >= goal)
             primed = true;
         uint64_t count = 0;
+        const float targetGain = requestedGain.load(std::memory_order_relaxed);
+        const float gainStep = 100.0f / float(b.rate); // At most 10 ms for a full-scale move.
         if (primed)
             for (int f = 0; f < b.frames; ++f) {
                 if (r == w) {
@@ -130,11 +147,13 @@ class CallbackAudio {
                 }
                 auto sample = samples[r++ % capacity];
                 fade = std::min(1.0f, fade + 200.0f / float(b.rate));
+                currentGain += std::clamp(targetGain - currentGain, -gainStep, gainStep);
+                const float returnGain = fade * currentGain;
                 for (int i = 0; i < layout.count(target); ++i)
                     if (mask & (1u << i)) {
                         const int c = layout.channel(target, i);
-                        b.write[c][f] += sample.left * fade;
-                        b.write[c + 1][f] += sample.right * fade;
+                        b.write[c][f] += sample.left * returnGain;
+                        b.write[c + 1][f] += sample.right * returnGain;
                     }
                 ++count;
             }

@@ -182,9 +182,15 @@ void Sender::read() {
                     status.udpErrors = o["udpErrors"].toVariant().toULongLong();
                     status.queuedMs = o["queueMs"].toInt();
                     status.underruns = o["underruns"].toVariant().toULongLong();
+                    status.outputMode =
+                        o["outputMode"].toString() == "callback" ? OutputMode::callback : OutputMode::vban;
+                    status.callbackFrames = o["callbackFrames"].toVariant().toULongLong();
                     status.state = "Streaming";
                     status.detail =
-                        "Receiver confirms audio; local VBAN delivery is not VoiceMeeter confirmation.";
+                        status.outputMode == OutputMode::callback
+                            ? "Receiver uses direct VoiceMeeter callback output. Check its output status and "
+                              "meters."
+                            : "Receiver confirms audio; local VBAN delivery is not VoiceMeeter confirmation.";
                     lastAck = now();
                     return true;
                 }
@@ -259,7 +265,7 @@ bool Receiver::begin(const ReceiverConfig &c, QString &error, bool discover) {
         return false;
     }
     if (c.mode == OutputMode::callback) {
-        if (!callback.start(c.vmType, c.target, c.destinations, c.bufferMs, error)) {
+        if (!callback.start(c.vmType, c.target, c.destinations, c.bufferMs, error, c.busGainDb)) {
             stop();
             return false;
         }
@@ -516,11 +522,14 @@ void Receiver::tick() {
             disconnectPeer("Sender stopped reading status.");
             return;
         }
-        socket->write(frame(Message::ack, json({{"received", qint64(status.received)},
-                                                {"sent", qint64(status.sent)},
-                                                {"udpErrors", qint64(status.udpErrors)},
-                                                {"queueMs", status.queuedMs},
-                                                {"underruns", qint64(status.underruns)}})));
+        socket->write(frame(Message::ack,
+                            json({{"received", qint64(status.received)},
+                                  {"sent", qint64(status.sent)},
+                                  {"udpErrors", qint64(status.udpErrors)},
+                                  {"queueMs", status.queuedMs},
+                                  {"underruns", qint64(status.underruns)},
+                                  {"outputMode", config.mode == OutputMode::callback ? "callback" : "vban"},
+                                  {"callbackFrames", qint64(status.callbackFrames)}})));
         lastAck = now();
     }
     shared.set(status);

@@ -50,7 +50,7 @@ bool obs_module_load(void) {
             }
         });
     obs_frontend_add_event_callback(event, nullptr);
-    blog(LOG_INFO, "[Elka AudioLink] 0.1.1 loaded");
+    blog(LOG_INFO, "[Elka AudioLink] 0.2.1 loaded");
     return true;
 }
 void obs_module_unload(void) {

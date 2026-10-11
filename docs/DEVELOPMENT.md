@@ -36,7 +36,7 @@ A separate Qt network thread converts to PCM24 VBAN packets and frames them insi
 TLS/TCP. The receiver validates those packets, buffers them, rewrites the local
 stream name and packet counter, and paces them to `127.0.0.1`. One receiver accepts
 one sender at a time. Callback mode instead converts PCM to VoiceMeeter's rate on
-the worker and fans the stereo return out to selected local strips or A buses.
+the worker and delivers the stereo return to one selected local strip or A bus.
 
 The protocol has a 4-byte big-endian length, a one-byte type, and a bounded payload
 (maximum 4096 bytes). Types: hello, ready, audio, ack, error. JSON hello carries
@@ -64,7 +64,7 @@ Input insert mode (1) processes pre-strip audio; output insert mode (2) processe
 pre-master buses. Only one category is registered. B channels pass through.
 
 The realtime callback copies every existing channel, then adds stereo to the first
-two channels of selected destinations. It performs no allocation, Qt calls,
+two channels of the selected destination. It performs no allocation, Qt calls,
 logging, networking, blocking lock or wait. A preallocated SPSC float ring separates
 it from the worker. Generation-based flushes avoid cross-thread cursor writes.
 Disconnects, rate changes and overflow re-prime with a short fade. The ring has a
@@ -78,11 +78,18 @@ changed editions require detection and re-selection. Busy registrations are neve
 stopped or unregistered. Failed owned unregister retains the disabled pass-through
 context and DLL, preventing a callback into freed memory.
 
-Protocol version 1 is unchanged. Older OBS senders remain compatible; their status
-still mentions VBAN, so the receiver shows its real mode and callback frame count.
+Single-destination validation is enforced in the UI, receiver config and API
+registration. Old multi-destination settings are cleared rather than choosing a
+route silently. Bus return gain is calculated in dB on the worker and passed to the
+callback through a lock-free atomic float. The callback ramps gain over at most
+10 ms and applies it only to the added return, preserving original audio. The UI
+persists live fader changes and updates the applied config used by tray Refresh.
+
+Protocol version 1 is unchanged. Optional ACK fields report the output mode and
+callback frame count to the new sender; older senders ignore them and remain compatible.
 Callback mode opens no local VBAN socket. Discovery UDP remains independent.
-`tools/Package.ps1` now produces only the 0.2.0 receiver installer and portable ZIP.
-OBS users keep the published 0.1.1 plugin. Older release artifacts are preserved.
+`tools/Package.ps1` produces matching 0.2.1 receiver and OBS sender installers plus
+a combined portable ZIP. Older release artifacts are preserved.
 
 ## Pairing
 
@@ -103,7 +110,8 @@ identity. It is not mDNS and does not install a service. No WAN relay is provide
 ## Validation
 
 `voicemeeter-callback-routing` verifies every strip/A destination in all editions,
-multi-selection, stereo polarity, preservation of existing/surround/B channels,
+single-selection enforcement, live bus gain/mute, stereo polarity, preservation of
+existing/surround/B channels,
 conflicting owners, failed start/release, changed editions, flushes, real TLS with
 legacy framing, 44.1/48 kHz conversion in both directions, no local UDP in Callback,
 acknowledgements and switching back to VBAN. It simulates the API boundary without
@@ -114,7 +122,7 @@ options and unapplied tab edits. Live callback listening remains unverified.
 When `ELKA_LEGACY_PLUGIN` points to a published 0.1.1 DLL, CTest also runs that actual
 old plugin through the new callback receiver. `tools/Test-Obs32.ps1` accepts
 `-PluginPath` and `-Callback` to run the same check under a supplied OBS 32 runtime.
-See [0.2.0 validation](VALIDATION-0.2.0.md) for the recorded results and limits.
+See [0.2.1 validation](VALIDATION-0.2.1.md) for the checks and limits.
 
 `receiver-tray-and-meter` exercises the real receiver window on the Windows Qt
 platform with isolated settings and a TLS sender. It checks continuing VBAN audio

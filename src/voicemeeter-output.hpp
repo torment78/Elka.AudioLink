@@ -30,7 +30,11 @@ class VoiceMeeterOutput {
     explicit VoiceMeeterOutput(std::unique_ptr<VmApi> api = makeVmApi());
     ~VoiceMeeterOutput();
     VmInfo detect();
-    bool start(int type, CallbackTarget target, uint32_t mask, int buffer, QString &error);
+    bool start(int type, CallbackTarget target, uint32_t mask, int buffer, QString &error, int busGainDb = 0);
+    void setBusGainDb(int db) {
+        if (audio)
+            audio->setBusGainDb(db);
+    }
     bool stop(QString &error);
     void flush();
     void feed(const float *samples, size_t frames, uint32_t rate);

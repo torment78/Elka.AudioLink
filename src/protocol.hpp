@@ -94,6 +94,7 @@ struct ReceiverConfig {
     CallbackTarget target = CallbackTarget::strips;
     uint32_t destinations = 0;
     int vmType = 0;
+    int busGainDb = 0; // -61 = mute; otherwise -60 through 0 dB, return audio only.
 };
 QByteArray json(const QJsonObject &);
 bool validLocalConfig(const ReceiverConfig &, QString &error);

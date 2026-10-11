@@ -63,9 +63,11 @@ bool validLocalConfig(const ReceiverConfig &c, QString &error) {
         error = "Choose VBAN or Callback output.";
     else if (c.mode == OutputMode::callback &&
              ((c.target != CallbackTarget::strips && c.target != CallbackTarget::buses) ||
-              !VmLayout::forType(c.vmType).count(c.target) || !c.destinations ||
+              !VmLayout::forType(c.vmType).count(c.target) || !singleDestination(c.destinations) ||
               (c.destinations >> VmLayout::forType(c.vmType).count(c.target))))
-        error = "Detect VoiceMeeter and select at least one available destination.";
+        error = "Detect VoiceMeeter and pick one channel only.";
+    else if (c.mode == OutputMode::callback && (c.busGainDb < -61 || c.busGainDb > 0))
+        error = "Bus return level must be Mute or between -60 and 0 dB.";
     else {
         error.clear();
         return true;

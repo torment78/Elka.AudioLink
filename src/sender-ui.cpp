@@ -182,16 +182,28 @@ void SenderPanel::updateStatus() {
     detail->setText(inputError.isEmpty() ? s.detail : inputError);
     meter->setValue(int(std::clamp(s.peak, 0.0, 1.0) * 100));
     const auto capture = monitor.status(0);
-    counts->setText(
-        QString("Receiver acknowledged: %1 packets   •   Local VBAN sent: %2\nReceiver UDP errors: %3   •   "
+    if (s.outputMode == OutputMode::callback) {
+        counts->setText(
+            QString("Receiver acknowledged: %1 packets   •   Callback delivered: %2 frames\n"
+                    "Queue: %3 ms   •   Sender drops: %4\nCapture drops: %5   •   Late source frames: %6")
+                .arg(s.received)
+                .arg(s.callbackFrames)
+                .arg(s.queuedMs)
+                .arg(s.dropped)
+                .arg(capture.capture_drops)
+                .arg(capture.late_audio_frames));
+    } else
+        counts->setText(
+            QString(
+                "Receiver acknowledged: %1 packets   •   Local VBAN sent: %2\nReceiver UDP errors: %3   •   "
                 "Queue: %4 ms   •   Sender drops: %5\nCapture drops: %6   •   Late source frames: %7")
-            .arg(s.received)
-            .arg(s.sent)
-            .arg(s.udpErrors)
-            .arg(s.queuedMs)
-            .arg(s.dropped)
-            .arg(capture.capture_drops)
-            .arg(capture.late_audio_frames));
+                .arg(s.received)
+                .arg(s.sent)
+                .arg(s.udpErrors)
+                .arg(s.queuedMs)
+                .arg(s.dropped)
+                .arg(capture.capture_drops)
+                .arg(capture.late_audio_frames));
     const auto list = shared.found();
     const auto selected = peers->currentData().toMap()["fingerprint"].toString();
     if (peers->view()->isVisible())

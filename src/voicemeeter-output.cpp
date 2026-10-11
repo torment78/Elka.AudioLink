@@ -38,13 +38,15 @@ VmInfo VoiceMeeterOutput::detect() {
     api->logout();
     return found;
 }
-bool VoiceMeeterOutput::start(int type, CallbackTarget target, uint32_t mask, int buffer, QString &error) {
+bool VoiceMeeterOutput::start(int type, CallbackTarget target, uint32_t mask, int buffer, QString &error,
+                              int busGainDb) {
     if (!stop(error))
         return false;
     failure.clear();
     const int count = VmLayout::forType(type).count(target);
-    if (!count || !mask || (mask >> count) || buffer < 20 || buffer > 200) {
-        error = "Detect VoiceMeeter and select at least one available destination.";
+    if (!count || !singleDestination(mask) || (mask >> count) || buffer < 20 || buffer > 200 ||
+        busGainDb < -61 || busGainDb > 0) {
+        error = "Detect VoiceMeeter, pick one channel only, and use a return level from Mute to 0 dB.";
         return false;
     }
     if (!api->load(error))
@@ -66,7 +68,7 @@ bool VoiceMeeterOutput::start(int type, CallbackTarget target, uint32_t mask, in
     }
     edition = type;
     bufferMs = buffer;
-    audio = std::make_unique<CallbackAudio>(type, target, mask, buffer);
+    audio = std::make_unique<CallbackAudio>(type, target, mask, buffer, busGainDb);
     char name[64] = "Elka AudioLink";
     const auto rc = api->registerCallback(target == CallbackTarget::strips ? 1 : 2, CallbackAudio::callback,
                                           audio.get(), name);
@@ -202,7 +204,7 @@ CallbackStats VoiceMeeterOutput::poll() {
     s.detail = !failure.isEmpty() ? failure
                : !s.calls || heartbeat.elapsed() > 2000
                    ? "Waiting for VoiceMeeter audio callbacks. Check that its audio engine is running."
-                   : "Direct callback active. Return mixes into selected destinations; check VoiceMeeter's "
+                   : "Direct callback active. Return mixes into the selected channel; check VoiceMeeter's "
                      "meters and output routing.";
     return s;
 }

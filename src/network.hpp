@@ -50,6 +50,10 @@ class Receiver : public QTcpServer {
     QString pairing() const {
         return identity.pairing();
     }
+    void setCallbackBusGainDb(int db) {
+        config.busGainDb = std::clamp(db, -61, 0);
+        callback.setBusGainDb(config.busGainDb);
+    }
     quint16 listeningPort() const {
         return serverPort();
     }

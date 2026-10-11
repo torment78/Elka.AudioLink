@@ -205,7 +205,7 @@ class ReceiverWindow : public QWidget {
         bufferForm->addRow("Receive buffer", buffer);
         outputLayout->addLayout(bufferForm);
         auto *applyHint = new QLabel(
-            "Choose a tab and destinations, then press Start / apply to change the active output.");
+            "Choose a tab and one channel, then press Start / apply. The bus return fader works live.");
         applyHint->setWordWrap(true);
         outputLayout->addWidget(applyHint);
         layout->addWidget(output);
@@ -242,6 +242,14 @@ class ReceiverWindow : public QWidget {
         receiver->moveToThread(&worker);
         connect(&worker, &QThread::finished, receiver, &QObject::deleteLater);
         worker.start();
+        callbackSettings->gainChanged = [this](int db) {
+            settings.setValue("callback/busGainDb", db);
+            settings.sync();
+            if (applied)
+                applied->busGainDb = db; // Tray Refresh keeps the latest live level.
+            QMetaObject::invokeMethod(
+                receiver, [this, db] { receiver->setCallbackBusGainDb(db); }, Qt::QueuedConnection);
+        };
         connect(callbackSettings->detect, &QPushButton::clicked, this, [this] { detectVoiceMeeter(); });
         connect(outputTabs, &QTabWidget::currentChanged, this, [this](int tab) {
             if (tab == 1)

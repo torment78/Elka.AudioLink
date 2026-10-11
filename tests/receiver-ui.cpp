@@ -54,6 +54,9 @@ int main(int argc, char **argv) {
             settings.setValue("port", port);
             settings.setValue("vbanPort", sink.localPort());
             settings.setValue("name", "Receiver lifecycle test");
+            settings.setValue("callback/edition", 3);
+            settings.setValue("callback/strips", 255);
+            settings.setValue("callback/buses", 31);
             settings.sync();
             auto fake = std::make_unique<MockVm>();
             auto *vm = fake.get();
@@ -64,39 +67,58 @@ int main(int argc, char **argv) {
             auto *tabs = window.findChild<QTabWidget *>("outputTabs");
             auto *strips = window.findChild<QRadioButton *>("callbackStrips");
             auto *buses = window.findChild<QRadioButton *>("callbackBuses");
-            auto *all = window.findChild<QPushButton *>("callbackAll");
+            auto *gain = window.findChild<QSlider *>("busReturnGain");
+            auto destination = [&](int n) {
+                return window.findChild<QRadioButton *>(QString("callbackDestination%1").arg(n));
+            };
             auto *detect = window.findChild<QPushButton *>("vmDetect");
             auto *routing = dynamic_cast<CallbackSettings *>(tabs->widget(1));
             tabs->setCurrentIndex(1);
             ReceiverConfig draft;
+            routing->configure(draft);
+            check(!draft.destinations &&
+                      window.findChild<QLabel *>("callbackSelectionHint")->text().contains("cleared"),
+                  "old multi-selection cleared without choosing a route");
             strips->click();
-            all->click();
+            destination(8)->click();
             routing->configure(draft);
-            check(draft.vmType == 3 && draft.destinations == 255, "Potato exposes all eight strips");
+            check(draft.vmType == 3 && draft.destinations == 128 && !destination(8)->isHidden(),
+                  "Potato exposes In 8");
+            check(!gain->isVisible(), "bus fader is hidden for strips");
             buses->click();
-            all->click();
+            destination(5)->click();
             routing->configure(draft);
-            check(draft.destinations == 31 && draft.target == CallbackTarget::buses,
+            check(draft.destinations == 16 && draft.target == CallbackTarget::buses &&
+                      destination(6)->isHidden(),
                   "Potato exposes A1-A5 without B buses");
+            destination(2)->click();
+            routing->configure(draft);
+            check(draft.destinations == 2 && !destination(5)->isChecked(),
+                  "choosing another channel deselects the previous one");
+            gain->setValue(-6);
+            routing->configure(draft);
+            check(gain->isVisible() && draft.busGainDb == -6,
+                  "bus fader value reaches applied configuration");
+            QSettings saved(root.path() + "/receiver.ini", QSettings::IniFormat);
+            check(saved.value("callback/busGainDb").toInt() == -6, "live fader is persisted immediately");
             vm->edition = 2;
             detect->click();
             routing->configure(draft);
             check(draft.destinations == 0, "edition change clears stale selection");
-            all->click();
+            destination(3)->click();
             routing->configure(draft);
-            check(draft.destinations == 7, "Banana has three A buses");
+            check(draft.destinations == 4 && destination(4)->isHidden(), "Banana has three A buses");
             strips->click();
-            all->click();
+            destination(5)->click();
             routing->configure(draft);
-            check(draft.destinations == 31, "Banana has five strips");
+            check(draft.destinations == 16 && destination(6)->isHidden(), "Banana has five strips");
             vm->edition = 3;
             detect->click();
             buses->click();
-            all->click();
-            window.findChild<QCheckBox *>("callbackDestination2")->setChecked(false);
+            destination(1)->click();
             routing->configure(draft);
-            check(draft.destinations == 29 && !vm->callback,
-                  "arbitrary selection; editing does not activate callback");
+            check(draft.destinations == 1 && !vm->callback,
+                  "single selection; editing does not activate callback");
             tabs->setCurrentIndex(0);
             auto *tray = window.findChild<QSystemTrayIcon *>("receiverTray");
             auto *refresh = window.findChild<QAction *>("trayRefresh");
@@ -156,6 +178,8 @@ int main(int argc, char **argv) {
             if (argc > 1) {
                 check(window.grab().save(QString::fromLocal8Bit(argv[1])), "receiver preview saved");
                 tabs->setCurrentIndex(1);
+                check(routing->grab().save(QString::fromLocal8Bit(argv[1]) + ".routing.png"),
+                      "fader and single-channel controls preview saved");
                 check(window.grab().save(QString::fromLocal8Bit(argv[1]) + ".callback.png"),
                       "callback controls preview saved");
                 tabs->setCurrentIndex(0);

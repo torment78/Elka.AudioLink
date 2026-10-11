@@ -3,6 +3,7 @@
 #include <QString>
 #include <memory>
 #include <cstddef>
+#include <cstdint>
 namespace linkaudio {
 // ABI and mappings verified against the official Voicemeeter-SDK revision
 // 02a1abf15358ddb33e588cd31c43576a065f81ac, VoicemeeterRemote.h.
@@ -18,6 +19,9 @@ static_assert(sizeof(long) == 4 && offsetof(VmAudioBuffer, read) == 16);
 using VmCallback = long(__stdcall *)(void *, long, void *, long);
 constexpr long vmStarting = 1, vmEnding = 2, vmChange = 3, vmBufferIn = 10, vmBufferOut = 11;
 enum class CallbackTarget { strips = 0, buses = 1 };
+inline bool singleDestination(uint32_t mask) {
+    return mask && !(mask & (mask - 1));
+}
 struct VmInfo {
     int type = 0;
     QString version, message = "Detecting VoiceMeeter…";
