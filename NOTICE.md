@@ -21,3 +21,11 @@ are included in packages. Qt's host-dependent TLS plugins are not required.
 Microsoft Visual C++ runtime binaries are redistributed under the Visual Studio
 redistributable terms. Windows and VoiceMeeter are separate products and are not
 included. AudioLink is not affiliated with VB-Audio or the OBS Project.
+
+SpeexDSP's resampler is statically linked from the OBS 2025-07-11 dependency
+package. Its BSD license and author list are included under `licenses/speexdsp`.
+Source: https://gitlab.xiph.org/xiph/speexdsp
+
+The direct callback boundary follows the official VoiceMeeter Remote API:
+https://github.com/vburel2018/Voicemeeter-SDK/tree/02a1abf15358ddb33e588cd31c43576a065f81ac
+AudioLink loads the separately installed VoiceMeeter DLL; it does not redistribute it.

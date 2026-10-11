@@ -1,6 +1,10 @@
 # First test and troubleshooting
 
-Use the [0.1.1 release downloads](https://github.com/torment78/Elka.AudioLink/releases/tag/v0.1.1)
+For direct output, single-channel selection and the bus fader, start with the [Callback guide](CALLBACK.md).
+The VBAN checks below remain available through the VBAN tab.
+
+Use the [0.2.1 downloads](https://github.com/torment78/Elka.AudioLink/releases/tag/v0.2.1)
+(receiver installer, OBS sender installer, or combined portable ZIP)
 and follow the [setup guide](../README.md) first. The OBS PC needs the plugin; the
 VoiceMeeter PC needs the receiver. Both sides use the same receiver pairing code.
 

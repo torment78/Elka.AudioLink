@@ -1,11 +1,13 @@
 # Elka AudioLink
 
 Send the OBS headphone / monitor mix to another Windows PC over an encrypted TCP
-connection. A small receiver turns it into a local VBAN stream for VoiceMeeter.
+connection. The receiver delivers it through local VBAN or directly through
+VoiceMeeter's audio callback.
 
-**0.1.1 preview · Windows x64 · OBS 31.1.1 or later**
+**0.2.1 preview · Receiver + OBS sender · Windows x64 · OBS 31.1.1 or later**
 
-**[Download 0.1.1](https://github.com/torment78/Elka.AudioLink/releases/tag/v0.1.1)**
+**[Download 0.2.1 — both apps](https://github.com/torment78/Elka.AudioLink/releases/tag/v0.2.1)**
+· [Callback setup](docs/CALLBACK.md)
 · [First test and troubleshooting](docs/TESTING.md)
 
 ## What it is for
@@ -13,13 +15,15 @@ connection. A small receiver turns it into a local VBAN stream for VoiceMeeter.
 AudioLink carries the OBS monitor mix to a second PC running VoiceMeeter. It is
 useful for a return feed, a listening mix, or a setup where sending VBAN directly
 across the network is unreliable. The OBS plugin sends audio over TLS/TCP; the
-receiver delivers a VBAN stream to VoiceMeeter on the same PC.
+receiver delivers audio to VoiceMeeter on the same PC. Callback mode needs no local
+VBAN stream or UDP audio port.
 
 ```mermaid
 flowchart LR
     A[OBS sources with monitoring enabled] --> B[AudioLink OBS plugin]
     B -->|Encrypted TCP across the network| C[AudioLink Receiver]
     C -->|Local VBAN to 127.0.0.1| D[VoiceMeeter input strip]
+    C -->|Direct callback| F[One selected input strip OR A bus]
     D --> E[Selected VoiceMeeter output]
 ```
 
@@ -40,19 +44,29 @@ same LAN for the first test. Install OBS and VoiceMeeter separately as needed.
 
 | PC / purpose | Download from the release | What it does |
 | --- | --- | --- |
-| OBS sending PC | [OBS plugin installer](https://github.com/torment78/Elka.AudioLink/releases/download/v0.1.1/elka-audiolink-obs-0.1.1-windows-x64-setup.exe) | Adds **Tools → Elka AudioLink** to OBS. |
-| VoiceMeeter receiving PC | [Receiver installer](https://github.com/torment78/Elka.AudioLink/releases/download/v0.1.1/elka-audiolink-receiver-0.1.1-windows-x64-setup.exe) | Receives the TCP audio and forwards local VBAN. OBS is not needed here. |
-| Manual installation | [Portable ZIP](https://github.com/torment78/Elka.AudioLink/releases/download/v0.1.1/elka-audiolink-0.1.1-windows-x64-portable.zip) | Contains separate `receiver` and `plugin` folders. |
+| OBS sending PC | [OBS sender installer](https://github.com/torment78/Elka.AudioLink/releases/download/v0.2.1/elka-audiolink-obs-0.2.1-windows-x64-setup.exe) | Adds **Tools → Elka AudioLink** to OBS. |
+| VoiceMeeter receiving PC | [Receiver installer](https://github.com/torment78/Elka.AudioLink/releases/download/v0.2.1/elka-audiolink-receiver-0.2.1-windows-x64-setup.exe) | Delivers through VBAN or Callback. OBS is not needed here. |
+| Both apps, manual installation | [Combined portable ZIP](https://github.com/torment78/Elka.AudioLink/releases/download/v0.2.1/elka-audiolink-0.2.1-windows-x64-portable.zip) | Separate `receiver` and `plugin` folders in one download. |
 
 Use the installers for the simplest setup. For the ZIP, keep the entire `receiver`
-folder together and run `ElkaAudioLink.exe`; with OBS closed, copy the contents of
+folder together and run `ElkaAudioLink.exe`. With OBS closed, copy the contents of
 the ZIP's `plugin` folder into the OBS root folder. GitHub's **Source code** archives
 contain source, not the runnable applications.
 
-The 0.1.1 preview installers are unsigned. Release downloads include a SHA-256
+The preview installers are unsigned. Release downloads include a SHA-256
 checksum file. OBS 31.1.1 and 32.2.1 were exercised in local integration tests.
 
 ## On the receiving PC
+
+For direct output, select **Callback**, click **Detect**, choose **Input strips**
+or **Output buses (A)**, pick **one channel only**, then press **Start / apply**.
+Potato offers In 1–In 8 or A1–A5; Banana offers In 1–In 5 or A1–A3. B buses are excluded.
+On the bus side, the **Bus return level** fader works live from 0 dB down to mute.
+It lowers only AudioLink's return, preserving other audio on the bus. Input strips
+use their normal VoiceMeeter faders. Your existing OBS plugin remains compatible.
+See [Callback setup and troubleshooting](docs/CALLBACK.md) for the full instructions.
+
+For the original output path, select the **VBAN** tab and follow these steps:
 
 1. Install **Elka AudioLink Receiver** and open it. OBS is not required on this PC.
 2. Leave the TCP port at **45991** and the receive buffer at **40 ms** initially.
@@ -95,8 +109,11 @@ updates are retained. Meter refresh pauses while hidden or minimized; audio keep
 flowing. It measures incoming audio before the receive buffer, not VoiceMeeter's
 playback level.
 
-To update from 0.1.0, exit the old receiver before installing 0.1.1. Pairing and
-saved settings are retained. The existing 0.1.0 OBS plugin remains compatible.
+To update, choose **Shut down** in the old receiver's tray menu before installing
+0.2.1. Close OBS before updating the sender. Pairing and saved VBAN settings are retained.
+If 0.2.0 had several callback destinations selected, choose one channel again after
+updating. Existing OBS plugins remain compatible. Switch back to VBAN and press
+Start / apply at any time.
 
 The receiver sends VBAN to loopback only. **127.0.0.1 belongs in VoiceMeeter's
 incoming sender field.** Use the receiving PC's LAN address or hostname in the
@@ -136,7 +153,10 @@ change; a discovered name alone never authorizes an audio connection.
 
 The sender distinguishes connecting, authenticated, and streaming with receiver
 acknowledgements. The helper shows received audio level, received packet count,
-local VBAN sends, UDP errors, buffer depth, discarded audio, and underruns.
+local output counters, buffer depth, discarded audio, and underruns. Callback mode
+shows frames processed by the callback and VoiceMeeter's sample rate. This
+confirms processing, not that a physical output is audible. The 0.2.1 sender reports
+the receiver's output mode; older senders may still mention VBAN in their status text.
 
 **Local VBAN sent means Windows accepted a local UDP packet. It does not confirm
 VoiceMeeter received or played it.** Check the VoiceMeeter input meter and listen.
@@ -165,8 +185,9 @@ Sender settings live in OBS's `plugin_config/elka-audiolink` folder. Pairing sec
 and the receiver private key are protected with Windows DPAPI for the current user.
 No accounts, cloud service, recordings, or telemetry are used.
 
-This is a preview. Local integration tests can prove the transport and plugin
-behavior, but cannot prove that it fixes another PC's VoiceMeeter receive problem.
+This is a preview. Automated callback tests simulate the VoiceMeeter engine using
+its documented API layout. Live callback listening still needs confirmation on the
+target PC. Local tests cannot prove that its final output routing is audible.
 
 Build and engineering details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 License and reused components: [NOTICE.md](NOTICE.md).

@@ -182,9 +182,15 @@ void Sender::read() {
                     status.udpErrors = o["udpErrors"].toVariant().toULongLong();
                     status.queuedMs = o["queueMs"].toInt();
                     status.underruns = o["underruns"].toVariant().toULongLong();
+                    status.outputMode =
+                        o["outputMode"].toString() == "callback" ? OutputMode::callback : OutputMode::vban;
+                    status.callbackFrames = o["callbackFrames"].toVariant().toULongLong();
                     status.state = "Streaming";
                     status.detail =
-                        "Receiver confirms audio; local VBAN delivery is not VoiceMeeter confirmation.";
+                        status.outputMode == OutputMode::callback
+                            ? "Receiver uses direct VoiceMeeter callback output. Check its output status and "
+                              "meters."
+                            : "Receiver confirms audio; local VBAN delivery is not VoiceMeeter confirmation.";
                     lastAck = now();
                     return true;
                 }
@@ -242,22 +248,34 @@ void Sender::tick() {
     status.dropped = queue.dropped.load();
     shared.set(status);
 }
-Receiver::Receiver(Identity id, SharedStatus &s) : identity(std::move(id)), shared(s) {}
+Receiver::Receiver(Identity id, SharedStatus &s, std::unique_ptr<VmApi> api)
+    : identity(std::move(id)), shared(s), callback(std::move(api)) {}
 bool Receiver::begin(const ReceiverConfig &c, QString &error, bool discover) {
     if (!validLocalConfig(c, error))
         return false;
     stop();
+    // A failed callback release must block switching outputs, never leave two paths active.
+    if (!callback.stop(error))
+        return false;
     config = c;
     status = {};
+    status.outputMode = c.mode;
     if (!listen(QHostAddress::AnyIPv4, c.port)) {
         error = errorString();
         return false;
     }
-    local = new QUdpSocket(this);
-    if (!local->bind(QHostAddress::LocalHost, 0)) {
-        error = local->errorString();
-        stop();
-        return false;
+    if (c.mode == OutputMode::callback) {
+        if (!callback.start(c.vmType, c.target, c.destinations, c.bufferMs, error, c.busGainDb)) {
+            stop();
+            return false;
+        }
+    } else {
+        local = new QUdpSocket(this);
+        if (!local->bind(QHostAddress::LocalHost, 0)) {
+            error = local->errorString();
+            stop();
+            return false;
+        }
     }
     if (discover) {
         discovery = new QUdpSocket(this);
@@ -306,6 +324,9 @@ void Receiver::stop() {
     status.state = "Stopped";
     status.peak = 0;
     status.queuedMs = 0;
+    QString callbackError;
+    if (!callback.stop(callbackError))
+        status.detail = callbackError;
     shared.set(status);
 }
 void Receiver::incomingConnection(qintptr descriptor) {
@@ -316,6 +337,7 @@ void Receiver::incomingConnection(qintptr descriptor) {
         return;
     }
     status = {};
+    status.outputMode = config.mode;
     socket = new SecureSocket(this);
     socket->setReadBufferSize(65536);
     socket->setLocalIdentity(identity.cert, identity.key);
@@ -348,6 +370,7 @@ void Receiver::disconnectPeer(const QString &why) {
     parser.clear();
     haveSequence = false;
     status.state = "Listening";
+    callback.flush();
     status.detail = why;
     status.connected = false;
     status.peak = 0;
@@ -391,6 +414,7 @@ bool Receiver::message(Message type, const QByteArray &data) {
         decoded.format.channels != 2 || decoded.frames != 128 || decoded.format.type != 2)
         return false;
     if (haveSequence && decoded.sequence != lastSequence + 1) {
+        callback.flush();
         ++status.dropped;
         packets.clear();
         primed = false;
@@ -398,6 +422,7 @@ bool Receiver::message(Message type, const QByteArray &data) {
     haveSequence = true;
     lastSequence = decoded.sequence;
     if (status.rate && status.rate != decoded.format.rate) {
+        callback.flush();
         packets.clear();
         primed = false;
     }
@@ -410,6 +435,10 @@ bool Receiver::message(Message type, const QByteArray &data) {
         peak[i % 2] = std::max(peak[i % 2], double(std::abs(decoded.samples[i])));
     status.peak = std::max(peak[0], peak[1]);
     shared.recordMeterPeak(peak);
+    if (config.mode == OutputMode::callback) {
+        callback.feed(decoded.samples.data(), decoded.frames, decoded.format.rate);
+        return true;
+    }
     auto packet = data;
     std::memset(packet.data() + 8, 0, 16);
     auto name = config.stream.toLatin1();
@@ -427,6 +456,17 @@ bool Receiver::message(Message type, const QByteArray &data) {
     return true;
 }
 void Receiver::tick() {
+    if (config.mode == OutputMode::callback) {
+        const auto output = callback.poll();
+        status.callbackCalls = output.calls;
+        status.callbackFrames = output.frames;
+        status.callbackRate = output.rate;
+        status.callbackDropped = output.dropped;
+        status.underruns = output.underruns;
+        status.queuedMs = output.queuedMs;
+        status.detail = output.detail;
+        shared.set(status);
+    }
     if (socket && !authenticated && now() - connectionAt > 5000) {
         disconnectPeer("Pairing timed out.");
         return;
@@ -437,52 +477,59 @@ void Receiver::tick() {
         disconnectPeer("Audio stopped; discarded queued audio.");
         return;
     }
-    const auto t = clock.nsecsElapsed();
-    const size_t target = std::max<size_t>(1, size_t(status.rate) * config.bufferMs / 128000);
-    if (!primed && status.rate && packets.size() >= target) {
-        primed = true;
-        due = t;
-    }
-    if (primed && status.rate) {
-        const qint64 interval = 128000000000LL / status.rate;
-        if (t - due > 20000000) {
+    if (config.mode == OutputMode::vban) {
+        const auto t = clock.nsecsElapsed();
+        const size_t target = std::max<size_t>(1, size_t(status.rate) * config.bufferMs / 128000);
+        if (!primed && status.rate && packets.size() >= target) {
+            primed = true;
             due = t;
-            ++status.underruns;
         }
-        int budget = 8;
-        while (t >= due && budget--) {
-            if (packets.empty()) {
-                primed = false;
+        if (primed && status.rate) {
+            const qint64 interval = 128000000000LL / status.rate;
+            if (t - due > 20000000) {
+                due = t;
                 ++status.underruns;
-                break;
             }
-            auto packet = std::move(packets.front());
-            packets.pop_front();
-            for (size_t b = 0; b < 4; ++b)
-                packet[qsizetype(24 + b)] = char(sequence >> (b * 8));
-            ++sequence;
-            if (local->writeDatagram(packet, QHostAddress::LocalHost, config.vbanPort) == packet.size())
-                ++status.sent;
-            else
-                ++status.udpErrors;
-            const auto adjustment =
-                std::clamp((double(packets.size()) - double(target)) / double(target) * 0.001, -0.002, 0.002);
-            due += qint64(double(interval) * (1.0 - adjustment));
+            int budget = 8;
+            while (t >= due && budget--) {
+                if (packets.empty()) {
+                    primed = false;
+                    ++status.underruns;
+                    break;
+                }
+                auto packet = std::move(packets.front());
+                packets.pop_front();
+                for (size_t b = 0; b < 4; ++b)
+                    packet[qsizetype(24 + b)] = char(sequence >> (b * 8));
+                ++sequence;
+                if (local->writeDatagram(packet, QHostAddress::LocalHost, config.vbanPort) == packet.size())
+                    ++status.sent;
+                else
+                    ++status.udpErrors;
+                const auto adjustment = std::clamp(
+                    (double(packets.size()) - double(target)) / double(target) * 0.001, -0.002, 0.002);
+                due += qint64(double(interval) * (1.0 - adjustment));
+            }
         }
+        status.queuedMs = status.rate ? int(packets.size() * 128000 / status.rate) : 0;
+        status.state = primed ? "Streaming" : "Buffering";
+        status.detail = "Local VBAN source 127.0.0.1; VoiceMeeter reception not confirmed.";
+    } else {
+        status.state = "Receiving — Callback";
     }
-    status.queuedMs = status.rate ? int(packets.size() * 128000 / status.rate) : 0;
-    status.state = primed ? "Streaming" : "Buffering";
-    status.detail = "Local VBAN source 127.0.0.1; VoiceMeeter reception not confirmed.";
     if (now() - lastAck >= 250 && socket) {
         if (socket->bytesToWrite() > 8192) {
             disconnectPeer("Sender stopped reading status.");
             return;
         }
-        socket->write(frame(Message::ack, json({{"received", qint64(status.received)},
-                                                {"sent", qint64(status.sent)},
-                                                {"udpErrors", qint64(status.udpErrors)},
-                                                {"queueMs", status.queuedMs},
-                                                {"underruns", qint64(status.underruns)}})));
+        socket->write(frame(Message::ack,
+                            json({{"received", qint64(status.received)},
+                                  {"sent", qint64(status.sent)},
+                                  {"udpErrors", qint64(status.udpErrors)},
+                                  {"queueMs", status.queuedMs},
+                                  {"underruns", qint64(status.underruns)},
+                                  {"outputMode", config.mode == OutputMode::callback ? "callback" : "vban"},
+                                  {"callbackFrames", qint64(status.callbackFrames)}})));
         lastAck = now();
     }
     shared.set(status);

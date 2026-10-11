@@ -3,6 +3,8 @@
 #include "network.hpp"
 #include "style.hpp"
 #include "level-meter.hpp"
+#include "callback-settings.hpp"
+#include <QTabWidget>
 #include <QApplication>
 #include <QClipboard>
 #include <QStandardPaths>
@@ -46,6 +48,15 @@ class ReceiverWindow : public QWidget {
     QSystemTrayIcon *tray = nullptr;
     std::optional<ReceiverConfig> applied;
     QString pairingCode;
+    QString startupError;
+    QTabWidget *outputTabs;
+    CallbackSettings *callbackSettings;
+    void detectVoiceMeeter() {
+        VmInfo info;
+        QMetaObject::invokeMethod(
+            receiver, [&] { info = receiver->detectVoiceMeeter(); }, Qt::BlockingQueuedConnection);
+        callbackSettings->showInfo(info);
+    }
 
     static QIcon applicationIcon() {
         QIcon icon;
@@ -114,14 +125,15 @@ class ReceiverWindow : public QWidget {
     }
 
   public:
-    explicit ReceiverWindow(const QString &root, bool trayEnabled = true)
+    explicit ReceiverWindow(const QString &root, bool trayEnabled = true,
+                            std::unique_ptr<VmApi> api = makeVmApi())
         : settings(root + "/receiver.ini", QSettings::IniFormat) {
         auto identity = loadIdentity(root);
         pairingCode = identity.pairing();
         setWindowTitle("Elka AudioLink Receiver");
         setWindowIcon(applicationIcon());
         setStyleSheet(linkaudio::style());
-        resize(680, 730);
+        resize(680, 850);
         setMinimumWidth(580);
         auto *outer = new QVBoxLayout(this);
         outer->setContentsMargins(0, 0, 0, 0);
@@ -137,7 +149,7 @@ class ReceiverWindow : public QWidget {
         auto *title = new QLabel("Elka AudioLink");
         title->setObjectName("title");
         layout->addWidget(title);
-        auto *sub = new QLabel("RECEIVER  /  Deliver the OBS monitor mix to local VBAN");
+        auto *sub = new QLabel("RECEIVER  /  Deliver the OBS monitor mix to VoiceMeeter");
         sub->setObjectName("subtitle");
         layout->addWidget(sub);
         auto *g = new QGroupBox("This receiver");
@@ -163,7 +175,11 @@ class ReceiverWindow : public QWidget {
         f->addRow("Local addresses", addresses);
         layout->addWidget(g);
         auto *output = new QGroupBox("VoiceMeeter on this PC");
-        auto *of = new QFormLayout(output);
+        auto *outputLayout = new QVBoxLayout(output);
+        outputTabs = new QTabWidget;
+        outputTabs->setObjectName("outputTabs");
+        auto *vbanPage = new QWidget;
+        auto *of = new QFormLayout(vbanPage);
         stream = new QLineEdit(settings.value("stream", "AudioLink").toString());
         stream->setMaxLength(16);
         of->addRow("VBAN stream name", stream);
@@ -171,16 +187,27 @@ class ReceiverWindow : public QWidget {
         vbanPort->setRange(1, 65535);
         vbanPort->setValue(settings.value("vbanPort", 6980).toInt());
         of->addRow("VBAN UDP port", vbanPort);
-        buffer = new QSpinBox;
-        buffer->setRange(20, 200);
-        buffer->setSuffix(" ms");
-        buffer->setValue(settings.value("buffer", 40).toInt());
-        of->addRow("Receive buffer", buffer);
         auto *hint =
             new QLabel("In VoiceMeeter, enable incoming VBAN with the same stream name, sender IP 127.0.0.1, "
                        "and the port above. AudioLink sends only to this PC's loopback address.");
         hint->setWordWrap(true);
         of->addRow(hint);
+        outputTabs->addTab(vbanPage, "VBAN");
+        callbackSettings = new CallbackSettings(settings);
+        outputTabs->addTab(callbackSettings, "Callback");
+        outputTabs->setCurrentIndex(settings.value("outputMode", 0).toInt() == 1 ? 1 : 0);
+        outputLayout->addWidget(outputTabs);
+        auto *bufferForm = new QFormLayout;
+        buffer = new QSpinBox;
+        buffer->setRange(20, 200);
+        buffer->setSuffix(" ms");
+        buffer->setValue(settings.value("buffer", 40).toInt());
+        bufferForm->addRow("Receive buffer", buffer);
+        outputLayout->addLayout(bufferForm);
+        auto *applyHint = new QLabel(
+            "Choose a tab and one channel, then press Start / apply. The bus return fader works live.");
+        applyHint->setWordWrap(true);
+        outputLayout->addWidget(applyHint);
         layout->addWidget(output);
         auto *buttons = new QHBoxLayout;
         auto *start = new QPushButton("Start / apply");
@@ -188,7 +215,8 @@ class ReceiverWindow : public QWidget {
         auto *stop = new QPushButton("Stop");
         buttons->addWidget(start);
         buttons->addWidget(stop);
-        layout->addLayout(buttons);
+        buttons->setContentsMargins(24, 8, 24, 16);
+        outer->addLayout(buttons);
         auto *sg = new QGroupBox("Audio arriving here");
         auto *sl = new QVBoxLayout(sg);
         state = new QLabel("Starting");
@@ -205,17 +233,31 @@ class ReceiverWindow : public QWidget {
         layout->insertWidget(2, sg);
         auto *note = new QLabel(
             "Close this window to keep receiving in the system tray. Right-click the AudioLink "
-            "tray icon to reopen settings, refresh reception, or shut down. Local VBAN sent "
-            "confirms Windows accepted the packets; check VoiceMeeter's meter to confirm reception.");
+            "tray icon to reopen settings, refresh reception, or shut down. Check VoiceMeeter's meters "
+            "and listen to confirm the final output.");
         note->setWordWrap(true);
         note->setObjectName("subtitle");
         layout->addWidget(note);
-        receiver = new Receiver(std::move(identity), shared);
+        receiver = new Receiver(std::move(identity), shared, std::move(api));
         receiver->moveToThread(&worker);
         connect(&worker, &QThread::finished, receiver, &QObject::deleteLater);
         worker.start();
+        callbackSettings->gainChanged = [this](int db) {
+            settings.setValue("callback/busGainDb", db);
+            settings.sync();
+            if (applied)
+                applied->busGainDb = db; // Tray Refresh keeps the latest live level.
+            QMetaObject::invokeMethod(
+                receiver, [this, db] { receiver->setCallbackBusGainDb(db); }, Qt::QueuedConnection);
+        };
+        connect(callbackSettings->detect, &QPushButton::clicked, this, [this] { detectVoiceMeeter(); });
+        connect(outputTabs, &QTabWidget::currentChanged, this, [this](int tab) {
+            if (tab == 1)
+                detectVoiceMeeter();
+        });
         connect(start, &QPushButton::clicked, this, [this] { begin(); });
         connect(stop, &QPushButton::clicked, this, [this] {
+            startupError.clear();
             QMetaObject::invokeMethod(receiver, [this] { receiver->stop(); }, Qt::QueuedConnection);
         });
         if (trayEnabled) {
@@ -264,21 +306,34 @@ class ReceiverWindow : public QWidget {
                 tray->setToolTip("Elka AudioLink — " + s.state);
             if (!isVisible() || isMinimized())
                 return;
-            state->setText(s.state);
-            detail->setText(s.detail);
-            counts->setText(
-                QString("Audio received: %1 packets   •   Local VBAN sent: %2\nUDP errors: %3   •   Buffer: "
+            state->setText((s.outputMode == OutputMode::callback ? "CALLBACK  /  " : "VBAN  /  ") + s.state);
+            detail->setText(startupError.isEmpty() ? s.detail : startupError);
+            if (s.outputMode == OutputMode::callback) {
+                counts->setText(QString("Audio received: %1 packets   •   Callback delivered: %2 frames\n"
+                                        "Buffer: %3 ms   •   Underruns: %4   •   Discarded: %5 frames\nOBS: "
+                                        "%6 Hz   •   VoiceMeeter: %7 Hz")
+                                    .arg(s.received)
+                                    .arg(s.callbackFrames)
+                                    .arg(s.queuedMs)
+                                    .arg(s.underruns)
+                                    .arg(s.callbackDropped)
+                                    .arg(s.rate)
+                                    .arg(s.callbackRate));
+            } else
+                counts->setText(
+                    QString(
+                        "Audio received: %1 packets   •   Local VBAN sent: %2\nUDP errors: %3   •   Buffer: "
                         "%4 ms   •   Discarded: %5\nBuffer underruns: %6   •   Sample rate: %7 Hz")
-                    .arg(s.received)
-                    .arg(s.sent)
-                    .arg(s.udpErrors)
-                    .arg(s.queuedMs)
-                    .arg(s.dropped)
-                    .arg(s.underruns)
-                    .arg(s.rate));
+                        .arg(s.received)
+                        .arg(s.sent)
+                        .arg(s.udpErrors)
+                        .arg(s.queuedMs)
+                        .arg(s.dropped)
+                        .arg(s.underruns)
+                        .arg(s.rate));
         });
         timer->start();
-        begin();
+        begin(false);
     }
     ~ReceiverWindow() override {
         if (tray)
@@ -313,27 +368,47 @@ class ReceiverWindow : public QWidget {
             QMessageBox::warning(this, "Cannot restart receiver", error);
         }
     }
-    void begin() {
+    void begin(bool interactive = true) {
         ReceiverConfig c{name->text().trimmed(), stream->text(), quint16(port->value()),
                          quint16(vbanPort->value()), buffer->value()};
+        c.mode = outputTabs->currentIndex() == 1 ? OutputMode::callback : OutputMode::vban;
+        if (c.mode == OutputMode::callback) {
+            detectVoiceMeeter();
+            callbackSettings->configure(c);
+        }
         QString error;
         if (!validLocalConfig(c, error)) {
-            QMessageBox::warning(this, "Receiver settings", error);
+            if (interactive)
+                QMessageBox::warning(this, "Receiver settings", error);
+            else {
+                startupError = error;
+                state->setText("Stopped — check output settings");
+                detail->setText(error);
+            }
             return;
         }
         bool ok = false;
         QMetaObject::invokeMethod(
             receiver, [&] { ok = receiver->begin(c, error); }, Qt::BlockingQueuedConnection);
         if (!ok) {
-            QMessageBox::warning(this, "Cannot start receiver", error);
+            if (interactive)
+                QMessageBox::warning(this, "Cannot start receiver", error);
+            else {
+                startupError = error;
+                state->setText("Stopped — cannot start receiver");
+                detail->setText(error);
+            }
             return;
         }
         settings.setValue("name", c.name);
+        startupError.clear();
         applied = c;
         settings.setValue("port", c.port);
         settings.setValue("stream", c.stream);
         settings.setValue("vbanPort", c.vbanPort);
         settings.setValue("buffer", c.bufferMs);
+        settings.setValue("outputMode", int(c.mode));
+        callbackSettings->save(settings);
         settings.sync();
         if (settings.status() != QSettings::NoError)
             QMessageBox::warning(this, "Settings",

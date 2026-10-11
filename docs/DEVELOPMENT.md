@@ -21,6 +21,7 @@ interface only inside isolated test hosts; the distributed plugin uses public AP
 ./tools/Build.ps1
 ./tools/Test.ps1
 ./tools/Package.ps1
+./tools/Test-ReceiverPackage.ps1
 ```
 
 ## Architecture
@@ -34,7 +35,8 @@ stereo float blocks. Its tunnel sink writes another bounded SPSC ring.
 A separate Qt network thread converts to PCM24 VBAN packets and frames them inside
 TLS/TCP. The receiver validates those packets, buffers them, rewrites the local
 stream name and packet counter, and paces them to `127.0.0.1`. One receiver accepts
-one sender at a time. Multiple monitor-return destinations are outside this preview.
+one sender at a time. Callback mode instead converts PCM to VoiceMeeter's rate on
+the worker and delivers the stereo return to one selected local strip or A bus.
 
 The protocol has a 4-byte big-endian length, a one-byte type, and a bounded payload
 (maximum 4096 bytes). Types: hello, ready, audio, ack, error. JSON hello carries
@@ -51,6 +53,43 @@ add delay; no fixed maximum end-to-end latency is promised.
 Loopback output uses a precise timer and small bounded bursts. A bounded pacing
 adjustment follows average queue depth to limit sender/receiver clock drift.
 The target PC still needs a listening and extended-load check.
+
+## VoiceMeeter callback output
+
+The ABI and channel maps follow the official
+[SDK revision 02a1abf](https://github.com/vburel2018/Voicemeeter-SDK/tree/02a1abf15358ddb33e588cd31c43576a065f81ac).
+The worker loads the installed x64 Remote DLL by absolute path, logs in and checks
+the running edition. No routing setters or VoiceMeeter launch calls are used.
+Input insert mode (1) processes pre-strip audio; output insert mode (2) processes
+pre-master buses. Only one category is registered. B channels pass through.
+
+The realtime callback copies every existing channel, then adds stereo to the first
+two channels of the selected destination. It performs no allocation, Qt calls,
+logging, networking, blocking lock or wait. A preallocated SPSC float ring separates
+it from the worker. Generation-based flushes avoid cross-thread cursor writes.
+Disconnects, rate changes and overflow re-prime with a short fade. The ring has a
+fixed 262,144-frame capacity; the consumer trims to target when latency exceeds
+target plus 100 ms. Target depth is at least two engine blocks.
+
+SpeexDSP resamples on the worker, including equal-rate streams for independent
+device clocks. A bounded 0.2% rate correction follows queue depth every half-second
+of input. API polling is worker-only. Engine changes request an explicit Refresh;
+changed editions require detection and re-selection. Busy registrations are never
+stopped or unregistered. Failed owned unregister retains the disabled pass-through
+context and DLL, preventing a callback into freed memory.
+
+Single-destination validation is enforced in the UI, receiver config and API
+registration. Old multi-destination settings are cleared rather than choosing a
+route silently. Bus return gain is calculated in dB on the worker and passed to the
+callback through a lock-free atomic float. The callback ramps gain over at most
+10 ms and applies it only to the added return, preserving original audio. The UI
+persists live fader changes and updates the applied config used by tray Refresh.
+
+Protocol version 1 is unchanged. Optional ACK fields report the output mode and
+callback frame count to the new sender; older senders ignore them and remain compatible.
+Callback mode opens no local VBAN socket. Discovery UDP remains independent.
+`tools/Package.ps1` produces matching 0.2.1 receiver and OBS sender installers plus
+a combined portable ZIP. Older release artifacts are preserved.
 
 ## Pairing
 
@@ -69,6 +108,21 @@ unicast JSON reply. Results are size-limited, expire, and never replace the pinn
 identity. It is not mDNS and does not install a service. No WAN relay is provided.
 
 ## Validation
+
+`voicemeeter-callback-routing` verifies every strip/A destination in all editions,
+single-selection enforcement, live bus gain/mute, stereo polarity, preservation of
+existing/surround/B channels,
+conflicting owners, failed start/release, changed editions, flushes, real TLS with
+legacy framing, 44.1/48 kHz conversion in both directions, no local UDP in Callback,
+acknowledgements and switching back to VBAN. It simulates the API boundary without
+launching or changing live VoiceMeeter. `callback-tests --probe` only queries the
+installed API's running edition/version. The UI test also checks edition-dependent
+options and unapplied tab edits. Live callback listening remains unverified.
+
+When `ELKA_LEGACY_PLUGIN` points to a published 0.1.1 DLL, CTest also runs that actual
+old plugin through the new callback receiver. `tools/Test-Obs32.ps1` accepts
+`-PluginPath` and `-Callback` to run the same check under a supplied OBS 32 runtime.
+See [0.2.1 validation](VALIDATION-0.2.1.md) for the checks and limits.
 
 `receiver-tray-and-meter` exercises the real receiver window on the Windows Qt
 platform with isolated settings and a TLS sender. It checks continuing VBAN audio

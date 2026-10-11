@@ -1,6 +1,6 @@
-param([string]$Version='0.1.1')
+param([string]$Version='0.2.1')
 $ErrorActionPreference='Stop'
-if($Version -ne '0.1.1'){throw 'Update the installer versions before packaging another version.'}
+if($Version -ne '0.2.1'){throw 'Update both installer versions before packaging another version.'}
 $root=Split-Path $PSScriptRoot -Parent
 $qt=Join-Path $root '.deps\obs-deps-qt6-2025-07-11-x64'
 $deps=Join-Path $root '.deps\obs-deps-2025-07-11-x64'
@@ -32,9 +32,11 @@ Copy-Tree "$root\data\locale" "$data\locale"
 foreach($file in @('README.md','LICENSE','NOTICE.md')){Copy-Item -LiteralPath "$root\$file" -Destination $helper;Copy-Item -LiteralPath "$root\$file" -Destination $data}
 Copy-Tree "$qt\licenses\qt6" "$helper\licenses\qt6"
 Copy-Tree "$deps\licenses\mbedtls" "$helper\licenses\mbedtls"
-Copy-Tree "$deps\licenses\mbedtls" "$data\mbedtls-license"
+Copy-Tree "$deps\licenses\speexdsp" "$helper\licenses\speexdsp"
 Copy-Tree "$root\docs" "$helper\docs"
 Copy-Tree "$root\docs" "$data\docs"
+Copy-Tree "$deps\licenses\mbedtls" "$data\licenses\mbedtls"
+Copy-Tree "$deps\licenses\speexdsp" "$data\licenses\speexdsp"
 $iscc="${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 foreach($name in @('receiver','plugin')){& $iscc "/DPayloadDir=$payload" "/DOutputPath=$output" "$root\installer\$name.iss";if($LASTEXITCODE){throw "Installer failed: $name"}}
 Compress-Archive -Path "$payload\receiver","$payload\plugin" -DestinationPath "$output\elka-audiolink-$Version-windows-x64-portable.zip" -Force

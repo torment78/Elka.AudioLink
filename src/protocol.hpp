@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "return-audio.hpp"
+#include "vm-api.hpp"
 #include <QByteArray>
 #include <QString>
 #include <QJsonObject>
@@ -11,6 +12,7 @@ namespace linkaudio {
 constexpr quint16 defaultPort = 45991, discoveryPort = 45992;
 constexpr int maxMessage = 4096;
 enum class Message : quint8 { hello = 1, ready = 2, audio = 3, ack = 4, error = 5 };
+enum class OutputMode { vban = 0, callback = 1 };
 QByteArray frame(Message type, const QByteArray &payload);
 class Parser {
   public:
@@ -43,6 +45,9 @@ struct Status {
     double peak = 0;
     int queuedMs = 0;
     bool connected = false;
+    OutputMode outputMode = OutputMode::vban;
+    uint64_t callbackFrames = 0, callbackCalls = 0, callbackDropped = 0;
+    uint32_t callbackRate = 0;
 };
 struct SharedStatus {
     mutable std::mutex mutex;
@@ -85,6 +90,11 @@ struct ReceiverConfig {
     QString name, stream = "AudioLink";
     quint16 port = defaultPort, vbanPort = 6980;
     int bufferMs = 40;
+    OutputMode mode = OutputMode::vban;
+    CallbackTarget target = CallbackTarget::strips;
+    uint32_t destinations = 0;
+    int vmType = 0;
+    int busGainDb = 0; // -61 = mute; otherwise -60 through 0 dB, return audio only.
 };
 QByteArray json(const QJsonObject &);
 bool validLocalConfig(const ReceiverConfig &, QString &error);

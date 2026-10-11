@@ -53,12 +53,21 @@ void AudioQueue::push(const float *samples, size_t frames, uint32_t rate) {
 bool validLocalConfig(const ReceiverConfig &c, QString &error) {
     if (c.name.trimmed().isEmpty() || c.name.size() > 64)
         error = "Enter a receiver name (1-64 characters).";
-    else if (!c.port || !c.vbanPort)
+    else if (!c.port || (c.mode == OutputMode::vban && !c.vbanPort))
         error = "Ports must be between 1 and 65535.";
-    else if (!vban::valid_stream_name(c.stream.toStdString()))
+    else if (c.mode == OutputMode::vban && !vban::valid_stream_name(c.stream.toStdString()))
         error = "VBAN stream name must be 1-16 printable ASCII characters.";
     else if (c.bufferMs < 20 || c.bufferMs > 200)
         error = "Receive buffer must be 20-200 ms.";
+    else if (c.mode != OutputMode::vban && c.mode != OutputMode::callback)
+        error = "Choose VBAN or Callback output.";
+    else if (c.mode == OutputMode::callback &&
+             ((c.target != CallbackTarget::strips && c.target != CallbackTarget::buses) ||
+              !VmLayout::forType(c.vmType).count(c.target) || !singleDestination(c.destinations) ||
+              (c.destinations >> VmLayout::forType(c.vmType).count(c.target))))
+        error = "Detect VoiceMeeter and pick one channel only.";
+    else if (c.mode == OutputMode::callback && (c.busGainDb < -61 || c.busGainDb > 0))
+        error = "Bus return level must be Mute or between -60 and 0 dB.";
     else {
         error.clear();
         return true;

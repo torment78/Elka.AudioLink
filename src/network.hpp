@@ -2,6 +2,7 @@
 #pragma once
 #include "protocol.hpp"
 #include "identity.hpp"
+#include "voicemeeter-output.hpp"
 #include <QObject>
 #include <QTcpServer>
 #include "secure-socket.hpp"
@@ -40,11 +41,18 @@ class Sender : public QObject {
 };
 class Receiver : public QTcpServer {
   public:
-    Receiver(Identity, SharedStatus &);
+    Receiver(Identity, SharedStatus &, std::unique_ptr<VmApi> = makeVmApi());
+    VmInfo detectVoiceMeeter() {
+        return callback.detect();
+    }
     bool begin(const ReceiverConfig &, QString &error, bool discover = true);
     void stop();
     QString pairing() const {
         return identity.pairing();
+    }
+    void setCallbackBusGainDb(int db) {
+        config.busGainDb = std::clamp(db, -61, 0);
+        callback.setBusGainDb(config.busGainDb);
     }
     quint16 listeningPort() const {
         return serverPort();
@@ -57,6 +65,7 @@ class Receiver : public QTcpServer {
     Identity identity;
     SharedStatus &shared;
     ReceiverConfig config;
+    VoiceMeeterOutput callback;
     Status status;
     SecureSocket *socket = nullptr;
     QUdpSocket *discovery = nullptr, *local = nullptr;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "network.hpp"
+#include "mock-vm.hpp"
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QAction>
@@ -38,7 +39,9 @@ int main(int argc, char **argv) {
             qputenv("QT_QPA_PLATFORM", "minimal:enable_fonts");
         qputenv("QT_STYLE_OVERRIDE", "Fusion");
         QApplication app(argc, argv);
-        check(argc == 4, "DLL, data, screenshot arguments");
+        check(argc == 4 || (argc == 5 && QByteArray(argv[4]) == "--callback"),
+              "DLL, data, screenshot, optional --callback arguments");
+        const bool direct = argc == 5;
         QTemporaryDir root;
         QWidget mainWindow;
         auto *frontend = new TestFrontend(mainWindow);
@@ -64,7 +67,9 @@ int main(int argc, char **argv) {
         check(panel, "Sender panel opens");
         auto identity = loadIdentity(root.path() + "/receiver");
         SharedStatus shared;
-        Receiver receiver(identity, shared);
+        auto fake = std::make_unique<MockVm>();
+        auto *vm = fake.get();
+        Receiver receiver(identity, shared, std::move(fake));
         QUdpSocket sink;
         check(sink.bind(QHostAddress::LocalHost, 0), "VBAN test sink");
         QTcpServer temp;
@@ -72,6 +77,12 @@ int main(int argc, char **argv) {
         auto port = temp.serverPort();
         temp.close();
         ReceiverConfig config{"Plugin test receiver", "PluginReturn", port, sink.localPort(), 30};
+        if (direct) {
+            config.mode = OutputMode::callback;
+            config.vmType = 3;
+            config.target = CallbackTarget::buses;
+            config.destinations = 1;
+        }
         QString error;
         check(receiver.begin(config, error, false), qPrintable(error));
         panel->findChild<QLineEdit *>("host")->setText("127.0.0.1");
@@ -97,6 +108,7 @@ int main(int argc, char **argv) {
         QElapsedTimer timer;
         timer.start();
         int produced = 0, matching = 0;
+        qint64 rendered = 0;
         while (timer.elapsed() < 2400) {
             while (produced * 10 <= timer.elapsed()) {
                 obs_source_audio audio{};
@@ -109,6 +121,14 @@ int main(int argc, char **argv) {
                 obs_source_output_audio(source, &audio);
             }
             app.processEvents();
+            if (direct)
+                while (rendered + 256 <= timer.nsecsElapsed() * 48000 / 1000000000) {
+                    vm->render();
+                    rendered += 256;
+                    if (std::abs(vm->output[0][255] - .21f) < .002f &&
+                        std::abs(vm->output[1][255] - .22f) < .002f)
+                        ++matching;
+                }
             while (sink.hasPendingDatagrams()) {
                 auto dg = sink.receiveDatagram();
                 vban::Packet p;
@@ -125,7 +145,10 @@ int main(int argc, char **argv) {
                   << "; sent=" << observed.sent << "; level=" << observed.peak << "; matching=" << matching
                   << "; " << observed.detail.toStdString() << '\n';
         check(panel->grab().save(QString::fromLocal8Bit(argv[3])), "sender UI screenshot saved");
-        check(matching > 100, "actual plugin monitored audio crosses TLS and local VBAN");
+        check(matching > 100, "actual plugin monitored audio crosses TLS and selected output");
+        if (direct)
+            check(observed.sent == 0 && observed.callbackFrames > 48000,
+                  "callback path active with no local VBAN");
         check(shared.get().received > 100, "receiver acknowledges plugin audio");
         obs_source_dec_active(source);
         obs_source_release(source);
@@ -135,9 +158,9 @@ int main(int argc, char **argv) {
         obs_shutdown();
         app.processEvents();
         obs_frontend_set_callbacks_internal(nullptr);
-        std::cout
-            << "PASS: actual OBS DLL load, Tools UI, settings apply, monitored PCM through TLS/local VBAN ("
-            << matching << " matching packets), shutdown\n";
+        std::cout << "PASS: actual OBS DLL load, Tools UI, settings apply, monitored PCM through TLS/"
+                  << (direct ? "callback" : "local VBAN") << " (" << matching
+                  << " matching blocks), shutdown\n";
         return 0;
     } catch (const std::exception &e) {
         std::cerr << "FAIL: " << e.what() << '\n';
